@@ -1,0 +1,14 @@
+[package]
+name = "io-tubes"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "provides functionality like pwntools tube for async io in rust"
+repository = "https://github.com/AnsonYeung/io-tubes"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1.57"
