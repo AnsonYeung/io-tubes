@@ -11,6 +11,8 @@ use tokio::{
     net::{TcpStream, ToSocketAddrs},
 };
 
+use crate::utils::Interactive;
+
 use super::ProcessTube;
 
 pin_project! {
@@ -20,11 +22,18 @@ pin_project! {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite> Tube<T> {
+impl<T: AsyncRead + AsyncWrite + Unpin> Tube<T> {
     pub fn new(inner: T) -> Self {
         Self {
             inner: BufReader::new(inner),
         }
+    }
+
+    /// ```rust, ignore
+    /// async pub fn interactive(&mut self) -> io::Result<()>
+    /// ```
+    pub fn interactive(&mut self) -> Interactive<T> {
+        Interactive::new(self)
     }
 }
 

@@ -6,8 +6,9 @@
 //! [`AsyncBufRead`](tokio::io::AsyncBufRead) + [`AsyncWrite`](tokio::io::AsyncWrite).
 //! For tubes not provided by this library, [`tokio`] library can provide other types that implements
 //! [`AsyncRead`](tokio::io::AsyncRead) + [`AsyncWrite`](tokio::io::AsyncWrite).
-//! Using [`Tube::new`](io_tubes::tubes::Tube::new) will use [`BufReader`](tokio::io::BufReader) to implement
-//! [`AsyncBufRead`](tokio::io::AsyncBufRead) and add extra functionality (WIP) to the tube.
+//! Using [`Tube::new`](crate::tubes::Tube::new) will use [`BufReader`](tokio::io::BufReader) to implement
+//! [`AsyncBufRead`](tokio::io::AsyncBufRead) and add extra functionality like
+//! [`interactive`](crate::tubes::Tube::interactive) to the tube.
 //!
 //! ```rust
 //! use io_tubes::traits::*;

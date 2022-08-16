@@ -1,6 +1,7 @@
 use std::{
     future::Future,
     io, mem,
+    ops::DerefMut,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -47,14 +48,14 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
 impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> Future for RecvUntil<'a, T> {
     type Output = io::Result<Vec<u8>>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         // reborrow everything so borrow checker actually understands
         let Self {
             inner,
             cur_index,
             lookup_table,
             buf,
-        } = &mut *self;
+        } = self.deref_mut();
         let mut inner = Pin::new(inner);
         loop {
             let result = match inner.as_mut().poll_fill_buf(cx) {

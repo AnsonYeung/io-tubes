@@ -19,6 +19,6 @@ async fn main() -> io::Result<()> {
     p.send(b"Hello World!").await?;
     let output = p.recv_until(b"World").await?;
     assert_eq!(output, b"Hello World");
-    Ok(())
+    p.interactive().await
 }
 ```
