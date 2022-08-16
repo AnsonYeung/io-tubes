@@ -3,9 +3,10 @@ use std::{
     io::{self, Error, ErrorKind},
     pin::Pin,
     process::Stdio,
+    task::{Context, Poll},
 };
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
 };
 
@@ -54,9 +55,9 @@ impl From<ProcessTube> for Child {
 impl AsyncRead for ProcessTube {
     fn poll_read(
         mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
+        cx: &mut Context,
+        buf: &mut ReadBuf,
+    ) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stdout).poll_read(cx, buf)
     }
 }
@@ -64,23 +65,17 @@ impl AsyncRead for ProcessTube {
 impl AsyncWrite for ProcessTube {
     fn poll_write(
         mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        cx: &mut Context,
         buf: &[u8],
-    ) -> std::task::Poll<Result<usize, io::Error>> {
+    ) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.stdin).poll_write(cx, buf)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stdin).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         Pin::new(&mut self.stdin).poll_shutdown(cx)
     }
 }

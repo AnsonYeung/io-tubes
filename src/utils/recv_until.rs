@@ -1,4 +1,9 @@
-use std::{future::Future, io, mem, pin::Pin, task::Poll};
+use std::{
+    future::Future,
+    io, mem,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::io::AsyncBufRead;
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -42,10 +47,7 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
 impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> Future for RecvUntil<'a, T> {
     type Output = io::Result<Vec<u8>>;
 
-    fn poll(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // reborrow everything so borrow checker actually understands
         let Self {
             inner,
