@@ -2,16 +2,9 @@
 //!
 //! Provides tube functionality like the python library [pwntools](https://github.com/Gallopsled/pwntools).
 //!
-//! The tube methods will be implemented as a trait for all structs that implements
-//! [`AsyncBufRead`](tokio::io::AsyncBufRead) + [`AsyncWrite`](tokio::io::AsyncWrite).
-//! For tubes not provided by this library, [`tokio`] library can provide other types that implements
-//! [`AsyncRead`](tokio::io::AsyncRead) + [`AsyncWrite`](tokio::io::AsyncWrite).
-//! Using [`Tube::new`](crate::tubes::Tube::new) will use [`BufReader`](tokio::io::BufReader) to implement
-//! [`AsyncBufRead`](tokio::io::AsyncBufRead) and add extra functionality like
-//! [`interactive`](crate::tubes::Tube::interactive) to the tube.
+//! Example:
 //!
 //! ```rust
-//! use io_tubes::traits::*;
 //! use io_tubes::tubes::Tube;
 //! use std::io;
 //!
@@ -24,6 +17,23 @@
 //!     Ok(())
 //! }
 //! ```
-pub mod traits;
+//!
+//! Any type that implement [`AsyncRead`](tokio::io::AsyncRead) + [`AsyncWrite`](tokio::io::AsyncWrite) can
+//! make use of [`Tube::new`](crate::tubes::Tube::new) to generate extra methods.
+//!
+//! ```rust, no_run
+//! use io_tubes::tubes::Tube;
+//! use std::io;
+//! use tokio::net::TcpStream;
+//!
+//! #[tokio::main]
+//! async fn main() -> io::Result<()> {
+//!     // The followings are equivalent.
+//!     let mut p: Tube<TcpStream> = Tube::remote("example.com:1337").await?;
+//!     let mut p: Tube<TcpStream> = Tube::new(TcpStream::connect("example.com:1337").await?);
+//!
+//!     Ok(())
+//! }
+//! ```
 pub mod tubes;
 mod utils;

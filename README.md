@@ -9,7 +9,6 @@ Documentation can be found at [docs.rs](https://docs.rs/io-tubes)
 
 ## Example
 ```rust
-use io_tubes::traits::*;
 use io_tubes::tubes::Tube;
 use std::io;
 

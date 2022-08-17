@@ -12,7 +12,7 @@ pub struct RecvUntil<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> {
     inner: &'a mut T,
     cur_index: usize,
     lookup_table: Vec<[usize; 256]>,
-    buf: Vec<u8>,
+    buf: &'a mut Vec<u8>,
 }
 
 impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
@@ -35,12 +35,12 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
         lookup_table
     }
 
-    pub fn new(inner: &'a mut T, delims: &[u8]) -> Self {
+    pub fn new(inner: &'a mut T, delims: &[u8], buf: &'a mut Vec<u8>) -> Self {
         Self {
             inner,
             cur_index: 0,
             lookup_table: Self::compute_lookup_table(delims),
-            buf: Vec::new(),
+            buf
         }
     }
 }
@@ -82,5 +82,41 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> Future for RecvUntil<'a, T> {
                 Err(err) => return Poll::Ready(Err(err)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::io::AsyncBufRead;
+
+    use super::RecvUntil;
+    use std::io;
+
+    async fn recv_until<T: AsyncBufRead + Unpin>(
+        inner: &mut T,
+        delims: &[u8],
+    ) -> io::Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        RecvUntil::new(inner, delims, &mut buf).await?;
+        Ok(buf)
+    }
+
+    #[tokio::test]
+    async fn can_recv_until() -> io::Result<()> {
+        let mut fake_reader: &[u8] = b"The quick brown fox jumps over the lazy dog";
+
+        // can recv_until
+        assert_eq!(
+            recv_until(&mut fake_reader, b"fox").await?,
+            b"The quick brown fox"
+        );
+
+        // can recv more
+        assert_eq!(recv_until(&mut fake_reader, b"over").await?, b" jumps over");
+
+        // can recv until EOF
+        assert_eq!(recv_until(&mut fake_reader, b"\0").await?, b" the lazy dog");
+
+        Ok(())
     }
 }
