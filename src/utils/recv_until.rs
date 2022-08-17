@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    io, mem,
+    io,
     ops::DerefMut,
     pin::Pin,
     task::{Context, Poll},
@@ -40,13 +40,13 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
             inner,
             cur_index: 0,
             lookup_table: Self::compute_lookup_table(delims),
-            buf
+            buf,
         }
     }
 }
 
 impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> Future for RecvUntil<'a, T> {
-    type Output = io::Result<Vec<u8>>;
+    type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         // reborrow everything so borrow checker actually understands
@@ -69,11 +69,11 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> Future for RecvUntil<'a, T> {
                         if *cur_index == lookup_table.len() {
                             buf.extend_from_slice(&new_buf[..=count]);
                             inner.as_mut().consume(count + 1);
-                            return Poll::Ready(Ok(mem::take(buf)));
+                            return Poll::Ready(Ok(()));
                         }
                     }
                     if new_buf.is_empty() {
-                        return Poll::Ready(Ok(mem::take(buf)));
+                        return Poll::Ready(Ok(()));
                     }
                     buf.extend_from_slice(new_buf);
                     let len = new_buf.len();
