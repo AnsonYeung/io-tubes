@@ -3,6 +3,7 @@ use std::{
     io,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use pin_project_lite::pin_project;
@@ -12,6 +13,7 @@ use tokio::{
         BufReader, ReadBuf,
     },
     net::{TcpStream, ToSocketAddrs},
+    time,
 };
 
 use crate::utils::{Interactive, RecvUntil};
@@ -19,41 +21,72 @@ use crate::utils::{Interactive, RecvUntil};
 use super::ProcessTube;
 
 pin_project! {
+    /// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
+    /// Note that the public `timeout` field is only used by methods directly provided by this
+    /// struct and not methods from traits.
     pub struct Tube<T> {
         #[pin]
         inner: BufReader<T>,
+        pub timeout: Duration,
     }
 }
 
 const NEW_LINE: u8 = 0xA;
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Tube<T> {
+    /// Construct a new `Tube<T>`.
     pub fn new(inner: T) -> Self {
         Self {
             inner: BufReader::new(inner),
+            timeout: Duration::MAX,
         }
     }
 
-    /// Receive up to `len` bytes
+    /// Construct a new `Tube<T>` with the supplied timeout argument. Note that timeout is only
+    /// implemented for methods directly provided by this struct and not methods from traits.
+    ///
+    /// Equivlently:
+    /// ```rust, no_run
+    /// use io_tubes::tubes::Tube;
+    /// use std::time::Duration;
+    ///
+    /// let mut p = Tube::process("/usr/bin/cat").unwrap();
+    /// p.timeout = Duration::from_millis(50);
+    /// ```
+    pub fn with_timeout(inner: T, timeout: Duration) -> Self {
+        Self {
+            inner: BufReader::new(inner),
+            timeout,
+        }
+    }
+
+    /// Receive up to `len` bytes.
     pub async fn recv(&mut self, len: usize) -> io::Result<Vec<u8>> {
         let mut buf = vec![0; len];
-        let len = self.read(&mut buf[..]).await?;
+        let len = time::timeout(self.timeout, self.read(&mut buf[..]))
+            .await
+            .unwrap_or(Ok(0))?;
         buf.truncate(len);
         Ok(buf)
     }
 
-    /// Receive until new line (0xA byte) is reached or EOF is reached
+    /// Receive until new line (0xA byte) is reached or EOF is reached.
     pub async fn recv_line(&mut self) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
-        self.read_until(NEW_LINE, &mut buf).await?;
+        time::timeout(self.timeout, self.read_until(NEW_LINE, &mut buf))
+            .await
+            .unwrap_or(Ok(0))?;
         Ok(buf)
     }
 
     /// Receive until the delims are found or EOF is reached.
+    ///
     /// A lookup table will be built to enable efficient matching of long patterns.
     pub async fn recv_until(&mut self, delims: &[u8]) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
-        RecvUntil::new(self, delims, &mut buf).await?;
+        time::timeout(self.timeout, RecvUntil::new(self, delims, &mut buf))
+            .await
+            .unwrap_or(Ok(()))?;
         Ok(buf)
     }
 

@@ -2,6 +2,8 @@
 //!
 //! Provides tube functionality like the python library [pwntools](https://github.com/Gallopsled/pwntools).
 //!
+//! The methods are provided in the struct [`Tube`](tubes::Tube)
+//!
 //! Example:
 //!
 //! ```rust
@@ -28,9 +30,9 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> io::Result<()> {
-//!     // The followings are equivalent.
-//!     let mut p: Tube<TcpStream> = Tube::remote("example.com:1337").await?;
-//!     let mut p: Tube<TcpStream> = Tube::new(TcpStream::connect("example.com:1337").await?);
+//!     // The followings are equivalent `Tube<TcpStream>`.
+//!     let mut p = Tube::remote("example.com:1337").await?;
+//!     let mut p = Tube::new(TcpStream::connect("example.com:1337").await?);
 //!
 //!     Ok(())
 //! }
