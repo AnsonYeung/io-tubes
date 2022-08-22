@@ -58,7 +58,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
     /// implemented for methods directly provided by this struct and not methods from traits.
     ///
     /// ```rust
-    /// #[tokio::test]
+    /// use io_tubes::tubes::{ProcessTube, Tube};
+    /// use std::{io, time::Duration};
+    ///
+    /// #[tokio::main]
     /// async fn create_with_timeout() -> io::Result<()> {
     ///     let mut p = Tube::process("/usr/bin/cat")?;
     ///     p.timeout = Duration::from_millis(50);
@@ -67,6 +70,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
     ///         Tube::with_timeout(ProcessTube::new("/usr/bin/cat")?, Duration::from_millis(50));
     ///     Ok(())
     /// }
+    ///
+    /// create_with_timeout();
     /// ```
     pub fn with_timeout(inner: T, timeout: Duration) -> Self {
         Self {
@@ -133,19 +138,24 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
 
     /// Send line after receiving the pattern from read.
     /// ```rust
-    /// #[tokio::test]
+    /// use io_tubes::tubes::Tube;
+    /// use std::io;
+    ///
+    /// #[tokio::main]
     /// async fn send_line_after() -> io::Result<()> {
     ///     let mut p = Tube::process("/usr/bin/cat")?;
     ///
-    ///     p.send(b"Hello, what's your name? ").await?;
+    ///     p.send("Hello, what's your name? ").await?;
     ///     assert_eq!(
-    ///         p.send_line_after(b"name", b"test").await?,
+    ///         p.send_line_after("name", "test").await?,
     ///         b"Hello, what's your name"
     ///     );
     ///     assert_eq!(p.recv_line().await?, b"? test\n");
     ///
     ///     Ok(())
     /// }
+    ///
+    /// send_line_after();
     /// ```
     pub async fn send_line_after<A: AsRef<[u8]>, B: AsRef<[u8]>>(
         &mut self,
@@ -171,14 +181,19 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
 impl Tube<BufReader<ProcessTube>> {
     /// Create a process with supplied path to program.
     /// ```rust
-    /// #[tokio::test]
+    /// use io_tubes::tubes::Tube;
+    /// use std::io;
+    ///
+    /// #[tokio::main]
     /// async fn create_process() -> io::Result<()> {
     ///     let mut p = Tube::process("/usr/bin/cat")?;
-    ///     p.send(b"abcdHi!").await?;
-    ///     let result = p.recv_until(b"Hi").await?;
+    ///     p.send("abcdHi!").await?;
+    ///     let result = p.recv_until("Hi").await?;
     ///     assert_eq!(result, b"abcdHi");
     ///     Ok(())
     /// }
+    ///
+    /// create_process();
     /// ```
     pub fn process<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
         Ok(Self::new(ProcessTube::new(program)?))
@@ -186,6 +201,29 @@ impl Tube<BufReader<ProcessTube>> {
 }
 
 impl Tube<BufReader<TcpStream>> {
+    /// Create a tube by connecting to the remote address.
+    /// ```rust
+    /// use io_tubes::tubes::{Listener, Tube};
+    /// use std::{
+    ///     io,
+    ///     net::{IpAddr, Ipv4Addr, SocketAddr},
+    /// };
+    ///
+    /// #[tokio::main]
+    /// async fn create_remote() -> io::Result<()> {
+    ///     let l = Listener::listen().await?;
+    ///     let mut p =
+    ///         Tube::remote(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), l.port()?)).await?;
+    ///     let mut server = l.accept().await?;
+    ///     p.send("Client Hello").await?;
+    ///     server.send("Server Hello").await?;
+    ///     assert_eq!(p.recv_until("Hello").await?, b"Server Hello");
+    ///     assert_eq!(server.recv_until("Hello").await?, b"Client Hello");
+    ///     Ok(())
+    /// }
+    /// 
+    /// create_remote();
+    /// ```
     pub async fn remote<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
         Ok(Self::new(TcpStream::connect(addr).await?))
     }

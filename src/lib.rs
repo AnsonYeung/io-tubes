@@ -10,7 +10,7 @@
 //! use io_tubes::tubes::Tube;
 //! use std::io;
 //!
-//! #[tokio::test]
+//! #[tokio::main]
 //! async fn demo() -> io::Result<()> {
 //!     let mut p = Tube::process("/usr/bin/cat")?;
 //!
@@ -23,6 +23,8 @@
 //!     assert_eq!(output, b"Hello World");
 //!     Ok(())
 //! }
+//!
+//! demo();
 //! ```
 //!
 //! Any type that implement [`AsyncRead`](tokio::io::AsyncRead) + [`AsyncWrite`](tokio::io::AsyncWrite) can
@@ -33,7 +35,7 @@
 //! use std::io;
 //! use tokio::net::TcpStream;
 //!
-//! #[tokio::test]
+//! #[tokio::main]
 //! async fn create_remote() -> io::Result<()> {
 //!     let l = Listener::bind("0.0.0.0:1337").await?;
 //!
@@ -43,6 +45,8 @@
 //!
 //!     Ok(())
 //! }
+//!
+//! create_remote();
 //! ```
 pub mod tubes;
 mod utils;

@@ -10,6 +10,7 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout, Command},
 };
 
+/// A tube-like struct that allows easy access to spawned process's stdin and stdout.
 #[derive(Debug)]
 pub struct ProcessTube {
     inner: Child,
@@ -18,8 +19,14 @@ pub struct ProcessTube {
 }
 
 impl ProcessTube {
+    /// Create a new ProcessTube by launching a program
     pub fn new<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
         Command::new(program).try_into()
+    }
+
+    /// Create a new ProcessTube using the specified command
+    pub fn from_command(cmd: Command) -> io::Result<Self> {
+        cmd.try_into()
     }
 }
 
