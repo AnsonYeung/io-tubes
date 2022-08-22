@@ -1,6 +1,6 @@
 [package]
 name = "io-tubes"
-version = "0.0.3"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "provides functionality like pwntools tube for async io in rust"
@@ -11,4 +11,3 @@ readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-tokio-test = "0.4.2"
