@@ -39,7 +39,6 @@ impl Listener {
     }
 }
 
-
 impl From<TcpListener> for Listener {
     fn from(inner: TcpListener) -> Self {
         Self { inner }

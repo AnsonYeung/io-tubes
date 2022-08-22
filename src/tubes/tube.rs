@@ -221,7 +221,7 @@ impl Tube<BufReader<TcpStream>> {
     ///     assert_eq!(server.recv_until("Hello").await?, b"Client Hello");
     ///     Ok(())
     /// }
-    /// 
+    ///
     /// create_remote();
     /// ```
     pub async fn remote<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
