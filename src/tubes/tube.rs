@@ -22,7 +22,9 @@ use super::ProcessTube;
 /// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
 #[derive(Debug)]
 pub struct Tube<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
-    inner: T,
+    /// The inner type, usually a BufReader containing the original type.
+    pub inner: T,
+
     /// This field is only used by methods directly provided by this struct and not methods from
     /// traits like [`AsyncRead`].
     ///
@@ -55,13 +57,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
     /// Construct a new `Tube<T>` with the supplied timeout argument. Note that timeout is only
     /// implemented for methods directly provided by this struct and not methods from traits.
     ///
-    /// Equivlently:
-    /// ```rust, no_run
-    /// use io_tubes::tubes::Tube;
-    /// use std::time::Duration;
-    ///
-    /// let mut p = Tube::process("/usr/bin/cat").unwrap();
-    /// p.timeout = Duration::from_millis(50);
+    /// ```rust
+    /// #[tokio::test]
+    /// async fn create_with_timeout() -> io::Result<()> {
+    ///     let mut p = Tube::process("/usr/bin/cat")?;
+    ///     p.timeout = Duration::from_millis(50);
+    ///     // Equivalent to
+    ///     let mut p =
+    ///         Tube::with_timeout(ProcessTube::new("/usr/bin/cat")?, Duration::from_millis(50));
+    ///     Ok(())
+    /// }
     /// ```
     pub fn with_timeout(inner: T, timeout: Duration) -> Self {
         Self {
@@ -72,6 +77,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
 }
 
 impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
+    /// Construct a tube from any custom buffered type.
+    pub fn from_buffered(inner: T) -> Self {
+        Self {
+            inner,
+            timeout: Duration::MAX,
+        }
+    }
+
     /// Receive up to `len` bytes.
     pub async fn recv(&mut self, len: usize) -> io::Result<Vec<u8>> {
         let mut buf = vec![0; len];
@@ -119,6 +132,21 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
     }
 
     /// Send line after receiving the pattern from read.
+    /// ```rust
+    /// #[tokio::test]
+    /// async fn send_line_after() -> io::Result<()> {
+    ///     let mut p = Tube::process("/usr/bin/cat")?;
+    ///
+    ///     p.send(b"Hello, what's your name? ").await?;
+    ///     assert_eq!(
+    ///         p.send_line_after(b"name", b"test").await?,
+    ///         b"Hello, what's your name"
+    ///     );
+    ///     assert_eq!(p.recv_line().await?, b"? test\n");
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn send_line_after<A: AsRef<[u8]>, B: AsRef<[u8]>>(
         &mut self,
         pattern: A,
@@ -141,6 +169,17 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
 }
 
 impl Tube<BufReader<ProcessTube>> {
+    /// Create a process with supplied path to program.
+    /// ```rust
+    /// #[tokio::test]
+    /// async fn create_process() -> io::Result<()> {
+    ///     let mut p = Tube::process("/usr/bin/cat")?;
+    ///     p.send(b"abcdHi!").await?;
+    ///     let result = p.recv_until(b"Hi").await?;
+    ///     assert_eq!(result, b"abcdHi");
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn process<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
         Ok(Self::new(ProcessTube::new(program)?))
     }
