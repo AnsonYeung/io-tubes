@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use pin_project_lite::pin_project;
 use tokio::{
     io::{
         AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
@@ -20,15 +19,11 @@ use crate::utils::{Interactive, RecvUntil};
 
 use super::ProcessTube;
 
-pin_project! {
-    /// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
-    /// Note that the public `timeout` field is only used by methods directly provided by this
-    /// struct and not methods from traits.
-    pub struct Tube<T> {
-        #[pin]
-        inner: BufReader<T>,
-        pub timeout: Duration,
-    }
+/// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
+pub struct Tube<T: Unpin> {
+    inner: BufReader<T>,
+    /// This field is only used by methods directly provided by this struct and not methods from traits.
+    pub timeout: Duration,
 }
 
 const NEW_LINE: u8 = 0xA;
@@ -128,36 +123,36 @@ impl Tube<TcpStream> {
     }
 }
 
-impl<T: AsyncRead> AsyncRead for Tube<T> {
+impl<T: AsyncRead + Unpin> AsyncRead for Tube<T> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut ReadBuf,
     ) -> Poll<io::Result<()>> {
-        self.project().inner.poll_read(cx, buf)
+        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
     }
 }
 
-impl<T: AsyncRead + AsyncWrite> AsyncWrite for Tube<T> {
+impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for Tube<T> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
-        self.project().inner.poll_write(cx, buf)
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        self.project().inner.poll_flush(cx)
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        self.project().inner.poll_shutdown(cx)
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
 
-impl<T: AsyncRead> AsyncBufRead for Tube<T> {
+impl<T: AsyncRead + Unpin> AsyncBufRead for Tube<T> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
-        self.project().inner.poll_fill_buf(cx)
+        Pin::new(&mut self.get_mut().inner).poll_fill_buf(cx)
     }
 
     fn consume(self: Pin<&mut Self>, amt: usize) {
-        self.project().inner.consume(amt)
+        Pin::new(&mut self.get_mut().inner).consume(amt)
     }
 }
