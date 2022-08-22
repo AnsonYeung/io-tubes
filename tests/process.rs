@@ -23,3 +23,18 @@ async fn can_send_line_after() -> io::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn can_accept_vec() -> io::Result<()> {
+    let mut p = Tube::process("/usr/bin/cat")?;
+
+    p.send(b"Hello, what's your name? ".to_vec()).await?;
+    assert_eq!(
+        p.send_line_after(b"name".to_vec(), b"test".to_vec())
+            .await?,
+        b"Hello, what's your name"
+    );
+    assert_eq!(p.recv_line().await?, b"? test\n");
+
+    Ok(())
+}

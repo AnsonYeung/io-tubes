@@ -13,15 +13,17 @@
 //! #[tokio::main]
 //! async fn main() -> io::Result<()> {
 //!     let mut p = Tube::process("/usr/bin/cat")?;
-//!     p.send(b"Hello World!").await?;
-//!     let output = p.recv_until(b"World").await?;
+//!     // "Hello World!" will be automatically converted to `&[u8]`
+//!     // Alternatively, you can explicitly use b"Hello World!" if it contains invalid UTF-8.
+//!     p.send("Hello World!").await?;
+//!     let output = p.recv_until("World").await?;
 //!     assert_eq!(output, b"Hello World");
 //!     Ok(())
 //! }
 //! ```
 //!
 //! Any type that implement [`AsyncRead`](tokio::io::AsyncRead) + [`AsyncWrite`](tokio::io::AsyncWrite) can
-//! make use of [`Tube::new`](crate::tubes::Tube::new) to generate extra methods.
+//! make use of [`Tube::new`](crate::tubes::Tube::new) to create a new tube.
 //!
 //! ```rust, no_run
 //! use io_tubes::tubes::Tube;
@@ -30,7 +32,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> io::Result<()> {
-//!     // The followings are equivalent `Tube<TcpStream>`.
+//!     // The followings are equivalent `Tube<BufReader<TcpStream>>`.
 //!     let mut p = Tube::remote("example.com:1337").await?;
 //!     let mut p = Tube::new(TcpStream::connect("example.com:1337").await?);
 //!

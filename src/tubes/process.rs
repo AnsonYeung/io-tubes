@@ -10,6 +10,7 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout, Command},
 };
 
+#[derive(Debug)]
 pub struct ProcessTube {
     inner: Child,
     stdin: ChildStdin,
@@ -18,7 +19,15 @@ pub struct ProcessTube {
 
 impl ProcessTube {
     pub fn new<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
-        Command::new(program)
+        Command::new(program).try_into()
+    }
+}
+
+impl TryFrom<Command> for ProcessTube {
+    type Error = io::Error;
+
+    fn try_from(mut value: Command) -> Result<Self, Self::Error> {
+        value
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?

@@ -10,12 +10,13 @@ use tokio::io::{self, AsyncBufRead, AsyncRead, AsyncWrite, BufReader, Stdin};
 use crate::tubes::Tube;
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Interactive<'a, T: AsyncRead + AsyncWrite + Unpin> {
+#[derive(Debug)]
+pub struct Interactive<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
     inner: &'a mut Tube<T>,
     stdin: BufReader<Stdin>,
 }
 
-impl<'a, T: AsyncRead + AsyncWrite + Unpin> Interactive<'a, T> {
+impl<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Interactive<'a, T> {
     pub fn new(inner: &'a mut Tube<T>) -> Self {
         Self {
             inner,
@@ -24,7 +25,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Interactive<'a, T> {
     }
 }
 
-impl<'a, T: AsyncRead + AsyncWrite + Unpin> Future for Interactive<'a, T> {
+impl<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Future for Interactive<'a, T> {
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

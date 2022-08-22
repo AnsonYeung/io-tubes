@@ -20,15 +20,30 @@ use crate::utils::{Interactive, RecvUntil};
 use super::ProcessTube;
 
 /// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
-pub struct Tube<T: Unpin> {
-    inner: BufReader<T>,
-    /// This field is only used by methods directly provided by this struct and not methods from traits.
+#[derive(Debug)]
+pub struct Tube<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
+    inner: T,
+    /// This field is only used by methods directly provided by this struct and not methods from
+    /// traits like [`AsyncRead`].
+    ///
+    /// This is due to the fact that during the polling, there is no way to keep track of the
+    /// futures involved. If 2 calls to the poll functions occurs, there is not enough
+    /// information in the argument to deduce whether it come from the same future or the previous
+    /// future is dropped and another future has started polling. As a result, the API will be
+    /// producing inconsistent timeout if it is implemented.
+    ///
+    /// Luckily, [`tokio::time::timeout`] provides an easy way to add timeout to a future (which is
+    /// how timeout is implemented in this library) so you can still have timeout behaviour on
+    /// functions that doesn't support them.
+    ///
+    /// Hence, timeout can only be reliably implemented for async fn (which returns a future under
+    /// the hood) or fn that return a future.
     pub timeout: Duration,
 }
 
 const NEW_LINE: u8 = 0xA;
 
-impl<T: AsyncRead + AsyncWrite + Unpin> Tube<T> {
+impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
     /// Construct a new `Tube<T>`.
     pub fn new(inner: T) -> Self {
         Self {
@@ -54,7 +69,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<T> {
             timeout,
         }
     }
+}
 
+impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
     /// Receive up to `len` bytes.
     pub async fn recv(&mut self, len: usize) -> io::Result<Vec<u8>> {
         let mut buf = vec![0; len];
@@ -77,29 +94,36 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<T> {
     /// Receive until the delims are found or EOF is reached.
     ///
     /// A lookup table will be built to enable efficient matching of long patterns.
-    pub async fn recv_until(&mut self, delims: &[u8]) -> io::Result<Vec<u8>> {
+    pub async fn recv_until<A: AsRef<[u8]>>(&mut self, delims: A) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
-        time::timeout(self.timeout, RecvUntil::new(self, delims, &mut buf))
-            .await
-            .unwrap_or(Ok(()))?;
+        time::timeout(
+            self.timeout,
+            RecvUntil::new(self, delims.as_ref(), &mut buf),
+        )
+        .await
+        .unwrap_or(Ok(()))?;
         Ok(buf)
     }
 
     /// Send data and flush.
-    pub async fn send(&mut self, data: &[u8]) -> io::Result<()> {
-        self.write_all(data).await?;
+    pub async fn send<A: AsRef<[u8]>>(&mut self, data: A) -> io::Result<()> {
+        self.write_all(data.as_ref()).await?;
         self.flush().await
     }
 
     /// Same as send, but add new line (0xA byte).
-    pub async fn send_line(&mut self, data: &[u8]) -> io::Result<()> {
-        self.write_all(data).await?;
+    pub async fn send_line<A: AsRef<[u8]>>(&mut self, data: A) -> io::Result<()> {
+        self.write_all(data.as_ref()).await?;
         self.write_all(&[NEW_LINE]).await?;
         self.flush().await
     }
 
     /// Send line after receiving the pattern from read.
-    pub async fn send_line_after(&mut self, pattern: &[u8], data: &[u8]) -> io::Result<Vec<u8>> {
+    pub async fn send_line_after<A: AsRef<[u8]>, B: AsRef<[u8]>>(
+        &mut self,
+        pattern: A,
+        data: B,
+    ) -> io::Result<Vec<u8>> {
         let result = self.recv_until(pattern).await?;
         self.send_line(data).await?;
         Ok(result)
@@ -109,21 +133,26 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<T> {
     pub async fn interactive(&mut self) -> io::Result<()> {
         Interactive::new(self).await
     }
+
+    /// Consume the tube to get back the underlying BufReader
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
 }
 
-impl Tube<ProcessTube> {
+impl Tube<BufReader<ProcessTube>> {
     pub fn process<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
         Ok(Self::new(ProcessTube::new(program)?))
     }
 }
 
-impl Tube<TcpStream> {
+impl Tube<BufReader<TcpStream>> {
     pub async fn remote<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
         Ok(Self::new(TcpStream::connect(addr).await?))
     }
 }
 
-impl<T: AsyncRead + Unpin> AsyncRead for Tube<T> {
+impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncRead for Tube<T> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -133,7 +162,7 @@ impl<T: AsyncRead + Unpin> AsyncRead for Tube<T> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for Tube<T> {
+impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncWrite for Tube<T> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
     }
@@ -147,12 +176,27 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncWrite for Tube<T> {
     }
 }
 
-impl<T: AsyncRead + Unpin> AsyncBufRead for Tube<T> {
+impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncBufRead for Tube<T> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
         Pin::new(&mut self.get_mut().inner).poll_fill_buf(cx)
     }
 
     fn consume(self: Pin<&mut Self>, amt: usize) {
         Pin::new(&mut self.get_mut().inner).consume(amt)
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + Unpin> From<Tube<BufReader<T>>> for BufReader<T> {
+    fn from(tube: Tube<BufReader<T>>) -> Self {
+        tube.into_inner()
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> From<T> for Tube<T> {
+    fn from(tube_like: T) -> Self {
+        Self {
+            inner: tube_like,
+            timeout: Duration::MAX,
+        }
     }
 }

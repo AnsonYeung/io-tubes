@@ -8,6 +8,7 @@ use std::{
 use tokio::io::AsyncBufRead;
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
+#[derive(Debug)]
 pub struct RecvUntil<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> {
     inner: &'a mut T,
     cur_index: usize,
