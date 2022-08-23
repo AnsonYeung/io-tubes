@@ -22,7 +22,7 @@ use super::ProcessTube;
 /// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
 #[derive(Debug)]
 pub struct Tube<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
-    /// The inner type, usually a BufReader containing the original type.
+    /// The inner struct, usually a BufReader containing the original struct.
     pub inner: T,
 
     /// This field is only used by methods directly provided by this struct and not methods from

@@ -9,6 +9,7 @@ use super::Tube;
 
 /// A TcpListener that returns Tube when a connection is accepted.
 pub struct Listener {
+    /// The inner TcpListener
     pub inner: TcpListener,
 }
 
@@ -20,7 +21,7 @@ impl Listener {
         })
     }
 
-    /// Create a listener by binding to 0.0.0.0:0
+    /// Create a listener by binding to `0.0.0.0:0`
     pub async fn listen() -> io::Result<Listener> {
         Listener::bind("0.0.0.0:0").await
     }
