@@ -11,12 +11,18 @@ use crate::tubes::Tube;
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
-pub struct Interactive<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
+pub struct Interactive<'a, T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     inner: &'a mut Tube<T>,
     stdin: BufReader<Stdin>,
 }
 
-impl<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Interactive<'a, T> {
+impl<'a, T> Interactive<'a, T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     pub fn new(inner: &'a mut Tube<T>) -> Self {
         Self {
             inner,
@@ -25,7 +31,10 @@ impl<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Interactive<'a, T> {
     }
 }
 
-impl<'a, T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Future for Interactive<'a, T> {
+impl<'a, T> Future for Interactive<'a, T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

@@ -9,14 +9,20 @@ use tokio::io::AsyncBufRead;
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
-pub struct RecvUntil<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> {
+pub struct RecvUntil<'a, T>
+where
+    T: AsyncBufRead + Unpin + ?Sized + 'a,
+{
     inner: &'a mut T,
     cur_index: usize,
     lookup_table: Vec<[usize; 256]>,
     buf: &'a mut Vec<u8>,
 }
 
-impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
+impl<'a, T> RecvUntil<'a, T>
+where
+    T: AsyncBufRead + Unpin + ?Sized + 'a,
+{
     fn compute_lookup_table(delims: &[u8]) -> Vec<[usize; 256]> {
         let mut lookup_table = Vec::with_capacity(delims.len());
         let mut lps = 0;
@@ -46,7 +52,10 @@ impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> RecvUntil<'a, T> {
     }
 }
 
-impl<'a, T: AsyncBufRead + Unpin + ?Sized + 'a> Future for RecvUntil<'a, T> {
+impl<'a, T> Future for RecvUntil<'a, T>
+where
+    T: AsyncBufRead + Unpin + ?Sized + 'a,
+{
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

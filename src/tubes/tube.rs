@@ -21,7 +21,10 @@ use super::ProcessTube;
 
 /// A wrapper to provide extra methods. Note that the API from this crate is different from pwntools.
 #[derive(Debug)]
-pub struct Tube<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
+pub struct Tube<T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     /// The inner struct, usually a BufReader containing the original struct.
     pub inner: T,
 
@@ -45,7 +48,10 @@ pub struct Tube<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> {
 
 const NEW_LINE: u8 = 0xA;
 
-impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
+impl<T> Tube<BufReader<T>>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
     /// Construct a new `Tube<T>`.
     pub fn new(inner: T) -> Self {
         Self {
@@ -81,7 +87,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Tube<BufReader<T>> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> Tube<T> {
+impl<T> Tube<T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     /// Construct a tube from any custom buffered type.
     pub fn from_buffered(inner: T) -> Self {
         Self {
@@ -229,7 +238,10 @@ impl Tube<BufReader<TcpStream>> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncRead for Tube<T> {
+impl<T> AsyncRead for Tube<T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -239,7 +251,10 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncRead for Tube<T> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncWrite for Tube<T> {
+impl<T> AsyncWrite for Tube<T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
     }
@@ -253,7 +268,10 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncWrite for Tube<T> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncBufRead for Tube<T> {
+impl<T> AsyncBufRead for Tube<T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
         Pin::new(&mut self.get_mut().inner).poll_fill_buf(cx)
     }
@@ -263,13 +281,19 @@ impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> AsyncBufRead for Tube<T> 
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + Unpin> From<Tube<BufReader<T>>> for BufReader<T> {
+impl<T> From<Tube<BufReader<T>>> for BufReader<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
     fn from(tube: Tube<BufReader<T>>) -> Self {
         tube.into_inner()
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin> From<T> for Tube<T> {
+impl<T> From<T> for Tube<T>
+where
+    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+{
     fn from(tube_like: T) -> Self {
         Self {
             inner: tube_like,
