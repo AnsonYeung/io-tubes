@@ -23,7 +23,7 @@ use super::ProcessTube;
 #[derive(Debug)]
 pub struct Tube<T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     /// The inner struct, usually a BufReader containing the original struct.
     pub inner: T,
@@ -89,7 +89,7 @@ where
 
 impl<T> Tube<T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     /// Construct a tube from any custom buffered type.
     pub fn from_buffered(inner: T) -> Self {
@@ -240,7 +240,7 @@ impl Tube<BufReader<TcpStream>> {
 
 impl<T> AsyncRead for Tube<T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -253,7 +253,7 @@ where
 
 impl<T> AsyncWrite for Tube<T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
@@ -270,7 +270,7 @@ where
 
 impl<T> AsyncBufRead for Tube<T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
         Pin::new(&mut self.get_mut().inner).poll_fill_buf(cx)
@@ -292,7 +292,7 @@ where
 
 impl<T> From<T> for Tube<T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     fn from(tube_like: T) -> Self {
         Self {

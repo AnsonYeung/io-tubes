@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{self, AsyncBufRead, AsyncRead, AsyncWrite, BufReader, Stdin};
+use tokio::io::{self, AsyncBufRead, AsyncWrite, BufReader, Stdin};
 
 use crate::tubes::Tube;
 
@@ -13,7 +13,7 @@ use crate::tubes::Tube;
 #[derive(Debug)]
 pub struct Interactive<'a, T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     inner: &'a mut Tube<T>,
     stdin: BufReader<Stdin>,
@@ -21,7 +21,7 @@ where
 
 impl<'a, T> Interactive<'a, T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     pub fn new(inner: &'a mut Tube<T>) -> Self {
         Self {
@@ -33,7 +33,7 @@ where
 
 impl<'a, T> Future for Interactive<'a, T>
 where
-    T: AsyncRead + AsyncWrite + AsyncBufRead + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
 {
     type Output = io::Result<()>;
 
