@@ -18,6 +18,22 @@ where
     write_buf: VecDeque<u8>,
 }
 
+impl<T, U> DebugTube<T, U>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+    U: AsyncWrite + Unpin,
+{
+    /// Create a new DebugTube with the supplied logger
+    pub fn new(inner: T, logger: U) -> Self {
+        Self {
+            inner,
+            logger,
+            read_buf: VecDeque::new(),
+            write_buf: VecDeque::new(),
+        }
+    }
+}
+
 impl<T, U> AsyncRead for DebugTube<T, U>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -101,6 +117,7 @@ where
         loop {
             let result = Pin::new(&mut *inner).poll_write(cx, &buf[numb..]);
             if let Poll::Ready(result) = result {
+                ready = true;
                 match result {
                     Err(e) => return Poll::Ready(Err(e)),
                     Ok(_numb) => {
@@ -120,7 +137,6 @@ where
         loop {
             let result = Pin::new(&mut *logger).poll_write(cx, write_buf.as_slices().0);
             if let Poll::Ready(result) = result {
-                ready = true;
                 match result {
                     Err(e) => return Poll::Ready(Err(e)),
                     Ok(numb) => {
@@ -243,3 +259,21 @@ where
 }
 
 // TODO: implement AsyncBufRead
+
+#[cfg(test)]
+mod test {
+    use super::DebugTube;
+    use crate::tubes::{ProcessTube, Tube};
+    use std::io;
+
+    #[tokio::test]
+    async fn can_debug_tube() -> io::Result<()> {
+        let mut logger = Vec::new();
+        let p = ProcessTube::new("/usr/bin/cat")?;
+        let mut p = Tube::new(DebugTube::new(p, &mut logger));
+        p.send_line("abc").await?;
+        assert_eq!(p.recv_line().await?, b"abc\n");
+        assert_eq!(logger, b"abc\nabc\n");
+        Ok(())
+    }
+}
