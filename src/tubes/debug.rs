@@ -261,7 +261,7 @@ where
 // TODO: implement AsyncBufRead
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::DebugTube;
     use crate::tubes::{ProcessTube, Tube};
     use std::io;
