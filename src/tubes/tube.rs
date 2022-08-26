@@ -87,6 +87,57 @@ where
     }
 }
 
+impl Tube<BufReader<ProcessTube>> {
+    /// Create a process with supplied path to program.
+    /// ```rust
+    /// use io_tubes::tubes::Tube;
+    /// use std::io;
+    ///
+    /// #[tokio::main]
+    /// async fn create_process() -> io::Result<()> {
+    ///     let mut p = Tube::process("/usr/bin/cat")?;
+    ///     p.send("abcdHi!").await?;
+    ///     let result = p.recv_until("Hi").await?;
+    ///     assert_eq!(result, b"abcdHi");
+    ///     Ok(())
+    /// }
+    ///
+    /// create_process();
+    /// ```
+    pub fn process<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
+        Ok(Self::new(ProcessTube::new(program)?))
+    }
+}
+
+impl Tube<BufReader<TcpStream>> {
+    /// Create a tube by connecting to the remote address.
+    /// ```rust
+    /// use io_tubes::tubes::{Listener, Tube};
+    /// use std::{
+    ///     io,
+    ///     net::{IpAddr, Ipv4Addr, SocketAddr},
+    /// };
+    ///
+    /// #[tokio::main]
+    /// async fn create_remote() -> io::Result<()> {
+    ///     let l = Listener::listen().await?;
+    ///     let mut p =
+    ///         Tube::remote(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), l.port()?)).await?;
+    ///     let mut server = l.accept().await?;
+    ///     p.send("Client Hello").await?;
+    ///     server.send("Server Hello").await?;
+    ///     assert_eq!(p.recv_until("Hello").await?, b"Server Hello");
+    ///     assert_eq!(server.recv_until("Hello").await?, b"Client Hello");
+    ///     Ok(())
+    /// }
+    ///
+    /// create_remote();
+    /// ```
+    pub async fn remote<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
+        Ok(Self::new(TcpStream::connect(addr).await?))
+    }
+}
+
 impl<T> Tube<T>
 where
     T: AsyncBufRead + AsyncWrite + Unpin,
@@ -184,57 +235,6 @@ where
     /// Consume the tube to get back the underlying BufReader
     pub fn into_inner(self) -> T {
         self.inner
-    }
-}
-
-impl Tube<BufReader<ProcessTube>> {
-    /// Create a process with supplied path to program.
-    /// ```rust
-    /// use io_tubes::tubes::Tube;
-    /// use std::io;
-    ///
-    /// #[tokio::main]
-    /// async fn create_process() -> io::Result<()> {
-    ///     let mut p = Tube::process("/usr/bin/cat")?;
-    ///     p.send("abcdHi!").await?;
-    ///     let result = p.recv_until("Hi").await?;
-    ///     assert_eq!(result, b"abcdHi");
-    ///     Ok(())
-    /// }
-    ///
-    /// create_process();
-    /// ```
-    pub fn process<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
-        Ok(Self::new(ProcessTube::new(program)?))
-    }
-}
-
-impl Tube<BufReader<TcpStream>> {
-    /// Create a tube by connecting to the remote address.
-    /// ```rust
-    /// use io_tubes::tubes::{Listener, Tube};
-    /// use std::{
-    ///     io,
-    ///     net::{IpAddr, Ipv4Addr, SocketAddr},
-    /// };
-    ///
-    /// #[tokio::main]
-    /// async fn create_remote() -> io::Result<()> {
-    ///     let l = Listener::listen().await?;
-    ///     let mut p =
-    ///         Tube::remote(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), l.port()?)).await?;
-    ///     let mut server = l.accept().await?;
-    ///     p.send("Client Hello").await?;
-    ///     server.send("Server Hello").await?;
-    ///     assert_eq!(p.recv_until("Hello").await?, b"Server Hello");
-    ///     assert_eq!(server.recv_until("Hello").await?, b"Client Hello");
-    ///     Ok(())
-    /// }
-    ///
-    /// create_remote();
-    /// ```
-    pub async fn remote<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        Ok(Self::new(TcpStream::connect(addr).await?))
     }
 }
 
