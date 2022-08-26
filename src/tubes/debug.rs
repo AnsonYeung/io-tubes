@@ -146,12 +146,97 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        // TODO: flush the write buffer
-        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+        let mut ready = true;
+
+        let Self {
+            inner,
+            logger,
+            read_buf: _,
+            write_buf,
+        } = self.get_mut();
+
+        if !write_buf.is_empty() {
+            loop {
+                let result = Pin::new(&mut *logger).poll_write(cx, write_buf.as_slices().0);
+                if let Poll::Ready(result) = result {
+                    ready = true;
+                    match result {
+                        Err(e) => return Poll::Ready(Err(e)),
+                        Ok(numb) => {
+                            if numb == 0 {
+                                break;
+                            }
+                            write_buf.drain(..numb);
+                            if write_buf.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if write_buf.is_empty() {
+            if let Poll::Ready(result) = Pin::new(logger).poll_flush(cx) {
+                if let Err(e) = result {
+                    return Poll::Ready(Err(e));
+                }
+            } else {
+                ready = false;
+            }
+        } else {
+            ready = false;
+        }
+
+        if let Poll::Ready(result) = Pin::new(inner).poll_flush(cx) {
+            if let Err(e) = result {
+                return Poll::Ready(Err(e));
+            }
+        } else {
+            ready = false;
+        }
+
+        if ready {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        // Ideally, the shutdown of the logger should be a no-op
+        // Since we own the logger here, we'll still propagate shutdown to it.
+        let mut ready = true;
+        if let Poll::Ready(result) = self.as_mut().poll_flush(cx) {
+            if let Err(e) = result {
+                return Poll::Ready(Err(e));
+            }
+            if let Poll::Ready(result) = Pin::new(&mut self.logger).poll_shutdown(cx) {
+                if let Err(e) = result {
+                    return Poll::Ready(Err(e));
+                }
+            } else {
+                ready = false;
+            }
+        } else {
+            ready = false;
+        }
+
+        if let Poll::Ready(result) = Pin::new(&mut self.inner).poll_shutdown(cx) {
+            if let Err(e) = result {
+                return Poll::Ready(Err(e));
+            }
+        } else {
+            ready = false;
+        }
+
+        if ready {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 
     // TODO: maybe implement vectored write
