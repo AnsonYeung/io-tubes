@@ -64,6 +64,9 @@ where
                             break;
                         }
                         read_buf.drain(..numb);
+                        if read_buf.is_empty() {
+                            break;
+                        }
                     }
                 }
             } else {
@@ -92,19 +95,19 @@ where
             write_buf,
         } = self.get_mut();
         let mut ready = false;
-
-        // write to logger
         let mut numb = 0;
+
+        // invoke underlying write
         loop {
-            let result = Pin::new(&mut *logger).poll_write(cx, &buf[numb..]);
+            let result = Pin::new(&mut *inner).poll_write(cx, &buf[numb..]);
             if let Poll::Ready(result) = result {
                 match result {
                     Err(e) => return Poll::Ready(Err(e)),
                     Ok(_numb) => {
-                        if _numb == 0 {
+                        numb += _numb;
+                        if numb == buf.len() || _numb == 0 {
                             break;
                         }
-                        numb += _numb;
                     }
                 }
             } else {
@@ -112,20 +115,22 @@ where
             }
         }
 
-        // only write stuff already written to logger so logger always log everything
-        // TODO: Should logger log before write or write before log?
+        // write to logger
         write_buf.extend(&buf[..numb]);
         loop {
-            let result = Pin::new(&mut *inner).poll_write(cx, write_buf.as_slices().0);
+            let result = Pin::new(&mut *logger).poll_write(cx, write_buf.as_slices().0);
             if let Poll::Ready(result) = result {
                 ready = true;
                 match result {
                     Err(e) => return Poll::Ready(Err(e)),
-                    Ok(_numb) => {
-                        if _numb == 0 {
+                    Ok(numb) => {
+                        if numb == 0 {
                             break;
                         }
-                        write_buf.drain(.._numb);
+                        write_buf.drain(..numb);
+                        if write_buf.is_empty() {
+                            break;
+                        }
                     }
                 }
             } else {
