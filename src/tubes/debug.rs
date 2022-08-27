@@ -1,11 +1,12 @@
 use std::{
-    collections::VecDeque,
-    io::{self, IoSlice},
+    cmp::min,
+    io,
+    ops::DerefMut,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, ReadBuf};
 
 pub struct DebugTube<T, U>
 where
@@ -14,8 +15,9 @@ where
 {
     inner: T,
     logger: U,
-    read_buf: VecDeque<u8>,
-    write_buf: VecDeque<u8>,
+    read_buf: Vec<u8>,
+    read_buf_logged: usize,
+    write_buf: Vec<u8>,
 }
 
 impl<T, U> DebugTube<T, U>
@@ -23,13 +25,19 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
 {
-    /// Create a new DebugTube with the supplied logger
+    /// Create a new DebugTube with the supplied logger with capacity 8KB
     pub fn new(inner: T, logger: U) -> Self {
+        Self::with_capacity(8 * 1024, inner, logger)
+    }
+
+    /// Create a new DebugTube with the specified capacity
+    pub fn with_capacity(capacity: usize, inner: T, logger: U) -> Self {
         Self {
             inner,
             logger,
-            read_buf: VecDeque::new(),
-            write_buf: VecDeque::new(),
+            read_buf: Vec::with_capacity(capacity),
+            read_buf_logged: 0,
+            write_buf: Vec::with_capacity(capacity),
         }
     }
 }
@@ -40,62 +48,24 @@ where
     U: AsyncWrite + Unpin,
 {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut ReadBuf,
     ) -> Poll<io::Result<()>> {
-        let Self {
-            inner,
-            logger,
-            read_buf,
-            write_buf: _,
-        } = self.get_mut();
-        let mut prev_len = buf.filled().len();
-        let mut ready = false;
-
-        // invoke underlying read
-        loop {
-            let result = Pin::new(&mut *inner).poll_read(cx, buf);
-            if result?.is_ready() {
-                ready = true;
-                let new = &buf.filled()[prev_len..];
-                read_buf.extend(new);
-                prev_len = buf.filled().len();
-            } else {
-                break;
-            }
-        }
-
-        // write to logger
-        loop {
-            let result = Pin::new(&mut *logger).poll_write_vectored(
-                cx,
-                &[
-                    IoSlice::new(read_buf.as_slices().0),
-                    IoSlice::new(read_buf.as_slices().1),
-                ],
-            )?;
-            if let Poll::Ready(numb) = result {
-                if numb == 0 {
-                    break;
-                }
-                read_buf.drain(..numb);
-                if read_buf.is_empty() {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        if ready {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
+        let read_buf = match self.as_mut().poll_fill_buf(cx)? {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(buf) => buf,
+        };
+        let remaining = min(buf.remaining(), read_buf.len());
+        buf.put_slice(&read_buf[..remaining]);
+        self.as_mut().consume(remaining);
+        Poll::Ready(Ok(()))
     }
 }
 
+// Vectored write is not implemented even if both logger and inner is optimied for vectored write.
+// This is due to the need for buffering will cause the slices to be stored in a Vec which defies
+// the purpose of a vectored write.
 impl<T, U> AsyncWrite for DebugTube<T, U>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -106,6 +76,7 @@ where
             inner,
             logger,
             read_buf: _,
+            read_buf_logged: _,
             write_buf,
         } = self.get_mut();
         let mut ready = false;
@@ -128,13 +99,7 @@ where
         // write to logger
         write_buf.extend(&buf[..numb]);
         loop {
-            let result = Pin::new(&mut *logger).poll_write_vectored(
-                cx,
-                &[
-                    IoSlice::new(write_buf.as_slices().0),
-                    IoSlice::new(write_buf.as_slices().1),
-                ],
-            )?;
+            let result = Pin::new(&mut *logger).poll_write(cx, write_buf)?;
             if let Poll::Ready(numb) = result {
                 if numb == 0 {
                     break;
@@ -162,18 +127,13 @@ where
             inner,
             logger,
             read_buf: _,
+            read_buf_logged: _,
             write_buf,
         } = self.get_mut();
 
         if !write_buf.is_empty() {
             loop {
-                let result = Pin::new(&mut *logger).poll_write_vectored(
-                    cx,
-                    &[
-                        IoSlice::new(write_buf.as_slices().0),
-                        IoSlice::new(write_buf.as_slices().1),
-                    ],
-                )?;
+                let result = Pin::new(&mut *logger).poll_write(cx, write_buf)?;
                 if let Poll::Ready(numb) = result {
                     ready = true;
                     if numb == 0 {
@@ -229,11 +189,77 @@ where
             Poll::Pending
         }
     }
-
-    // TODO: maybe implement vectored write
 }
 
-// TODO: implement AsyncBufRead
+impl<T, U> AsyncBufRead for DebugTube<T, U>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+    U: AsyncWrite + Unpin,
+{
+    fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
+        // while using unsafe code can lead to better performance, it's also easlier to make bugs.
+        if self.read_buf_logged > 0 {
+            let read_buf_logged = self.read_buf_logged;
+            return Poll::Ready(Ok(&self.get_mut().read_buf[..read_buf_logged]));
+        }
+
+        let Self {
+            inner,
+            logger,
+            read_buf,
+            read_buf_logged,
+            write_buf: _,
+        } = self.deref_mut();
+
+        let mut len = read_buf.len();
+        read_buf.resize(read_buf.capacity(), 0);
+        let mut ready = true;
+
+        while ready {
+            ready = false;
+
+            // invoke underlying read
+            let mut buf = ReadBuf::new(&mut read_buf[len..]);
+            let result = Pin::new(&mut *inner).poll_read(cx, &mut buf);
+            if result?.is_ready() {
+                ready = true;
+                len += buf.filled().len();
+            }
+
+            // write to logger
+            let result = Pin::new(&mut *logger).poll_write(cx, &read_buf[*read_buf_logged..len])?;
+            if let Poll::Ready(numb) = result {
+                if numb == 0 {
+                    read_buf.truncate(len);
+                    if ready || *read_buf_logged > 0 {
+                        // both logger and inner are ready, and we can't move forward because we
+                        // can't write to logger.
+                        let read_buf_logged = *read_buf_logged;
+                        return Poll::Ready(Ok(&self.get_mut().read_buf[..read_buf_logged]));
+                    }
+                    // inner is pending, there can be data incoming so we'll continue after inner
+                    // is ready.
+                    return Poll::Pending;
+                }
+                *read_buf_logged += numb;
+                ready = true;
+            }
+        }
+
+        read_buf.truncate(len);
+
+        if *read_buf_logged > 0 {
+            let read_buf_logged = *read_buf_logged;
+            return Poll::Ready(Ok(&self.get_mut().read_buf[..read_buf_logged]));
+        }
+
+        Poll::Pending
+    }
+
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        self.get_mut().read_buf.drain(..amt);
+    }
+}
 
 #[cfg(test)]
 mod tests {
