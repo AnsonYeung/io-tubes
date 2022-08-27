@@ -209,17 +209,16 @@ where
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        // Ideally, the shutdown of the logger should be a no-op
-        // Since we own the logger here, we'll still propagate shutdown to it.
+        // Do not perform shutdown on the logger, since the user can call shutdown if they passed a
+        // mutable reference to the constructor.
         let mut ready = true;
-        if self.as_mut().poll_flush(cx)?.is_ready() {
-            if Pin::new(&mut self.logger).poll_shutdown(cx)?.is_pending() {
-                ready = false;
-            }
-        } else {
+
+        // flush the logger
+        if self.as_mut().poll_flush(cx)?.is_pending() {
             ready = false;
         }
 
+        // shutdown inner
         if Pin::new(&mut self.inner).poll_shutdown(cx)?.is_pending() {
             ready = false;
         }
