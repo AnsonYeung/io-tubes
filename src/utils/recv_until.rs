@@ -68,29 +68,24 @@ where
         } = self.deref_mut();
         let mut inner = Pin::new(inner);
         loop {
-            let result = match inner.as_mut().poll_fill_buf(cx) {
+            let new_buf = match inner.as_mut().poll_fill_buf(cx)? {
                 Poll::Ready(result) => result,
                 Poll::Pending => return Poll::Pending,
             };
-            match result {
-                Ok(new_buf) => {
-                    for (count, new_byte) in new_buf.iter().enumerate() {
-                        *cur_index = lookup_table[*cur_index][*new_byte as usize];
-                        if *cur_index == lookup_table.len() {
-                            buf.extend_from_slice(&new_buf[..=count]);
-                            inner.as_mut().consume(count + 1);
-                            return Poll::Ready(Ok(()));
-                        }
-                    }
-                    if new_buf.is_empty() {
-                        return Poll::Ready(Ok(()));
-                    }
-                    buf.extend_from_slice(new_buf);
-                    let len = new_buf.len();
-                    inner.as_mut().consume(len);
+            for (count, new_byte) in new_buf.iter().enumerate() {
+                *cur_index = lookup_table[*cur_index][*new_byte as usize];
+                if *cur_index == lookup_table.len() {
+                    buf.extend_from_slice(&new_buf[..=count]);
+                    inner.as_mut().consume(count + 1);
+                    return Poll::Ready(Ok(()));
                 }
-                Err(err) => return Poll::Ready(Err(err)),
             }
+            if new_buf.is_empty() {
+                return Poll::Ready(Ok(()));
+            }
+            buf.extend_from_slice(new_buf);
+            let len = new_buf.len();
+            inner.as_mut().consume(len);
         }
     }
 }

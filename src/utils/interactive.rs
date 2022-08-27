@@ -42,44 +42,28 @@ where
         let mut stdin = stdin;
 
         // stdin -> input
-        while let Poll::Ready(res) = Pin::new(stdin.deref_mut()).poll_fill_buf(cx) {
-            match res {
-                Err(e) => return Poll::Ready(Err(e)),
-                Ok(buf) => {
-                    if buf.is_empty() {
-                        return Poll::Ready(Ok(()));
-                    }
-                    let write_res = Pin::new(inner.deref_mut()).poll_write(cx, buf);
-                    if let Poll::Ready(res) = write_res {
-                        match res {
-                            Err(e) => return Poll::Ready(Err(e)),
-                            Ok(amt) => Pin::new(stdin.deref_mut()).consume(amt),
-                        }
-                    } else {
-                        break;
-                    }
-                }
+        while let Poll::Ready(buf) = Pin::new(stdin.deref_mut()).poll_fill_buf(cx)? {
+            if buf.is_empty() {
+                return Poll::Ready(Ok(()));
+            }
+            let write_res = Pin::new(inner.deref_mut()).poll_write(cx, buf);
+            if let Poll::Ready(amt) = write_res? {
+                Pin::new(stdin.deref_mut()).consume(amt);
+            } else {
+                break;
             }
         }
 
         // output -> stdout
-        while let Poll::Ready(res) = Pin::new(inner.deref_mut()).poll_fill_buf(cx) {
-            match res {
-                Err(e) => return Poll::Ready(Err(e)),
-                Ok(buf) => {
-                    if buf.is_empty() {
-                        return Poll::Ready(Err(Error::from(ErrorKind::BrokenPipe)));
-                    }
-                    let write_res = Pin::new(&mut io::stdout()).poll_write(cx, buf);
-                    if let Poll::Ready(res) = write_res {
-                        match res {
-                            Err(e) => return Poll::Ready(Err(e)),
-                            Ok(amt) => Pin::new(inner.deref_mut()).consume(amt),
-                        }
-                    } else {
-                        break;
-                    }
-                }
+        while let Poll::Ready(buf) = Pin::new(inner.deref_mut()).poll_fill_buf(cx)? {
+            if buf.is_empty() {
+                return Poll::Ready(Err(Error::from(ErrorKind::BrokenPipe)));
+            }
+            let write_res = Pin::new(&mut io::stdout()).poll_write(cx, buf);
+            if let Poll::Ready(amt) = write_res? {
+                Pin::new(inner.deref_mut()).consume(amt);
+            } else {
+                break;
             }
         }
 

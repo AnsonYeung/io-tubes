@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    io,
+    io::{self, IoSlice},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -56,11 +56,8 @@ where
         // invoke underlying read
         loop {
             let result = Pin::new(&mut *inner).poll_read(cx, buf);
-            if let Poll::Ready(result) = result {
+            if result?.is_ready() {
                 ready = true;
-                if let Err(e) = result {
-                    return Poll::Ready(Err(e));
-                }
                 let new = &buf.filled()[prev_len..];
                 read_buf.extend(new);
                 prev_len = buf.filled().len();
@@ -71,19 +68,20 @@ where
 
         // write to logger
         loop {
-            let result = Pin::new(&mut *logger).poll_write(cx, read_buf.as_slices().0);
-            if let Poll::Ready(result) = result {
-                match result {
-                    Err(e) => return Poll::Ready(Err(e)),
-                    Ok(numb) => {
-                        if numb == 0 {
-                            break;
-                        }
-                        read_buf.drain(..numb);
-                        if read_buf.is_empty() {
-                            break;
-                        }
-                    }
+            let result = Pin::new(&mut *logger).poll_write_vectored(
+                cx,
+                &[
+                    IoSlice::new(read_buf.as_slices().0),
+                    IoSlice::new(read_buf.as_slices().1),
+                ],
+            )?;
+            if let Poll::Ready(numb) = result {
+                if numb == 0 {
+                    break;
+                }
+                read_buf.drain(..numb);
+                if read_buf.is_empty() {
+                    break;
                 }
             } else {
                 break;
@@ -115,17 +113,12 @@ where
 
         // invoke underlying write
         loop {
-            let result = Pin::new(&mut *inner).poll_write(cx, &buf[numb..]);
-            if let Poll::Ready(result) = result {
+            let result = Pin::new(&mut *inner).poll_write(cx, &buf[numb..])?;
+            if let Poll::Ready(_numb) = result {
                 ready = true;
-                match result {
-                    Err(e) => return Poll::Ready(Err(e)),
-                    Ok(_numb) => {
-                        numb += _numb;
-                        if numb == buf.len() || _numb == 0 {
-                            break;
-                        }
-                    }
+                numb += _numb;
+                if numb == buf.len() || _numb == 0 {
+                    break;
                 }
             } else {
                 break;
@@ -135,19 +128,20 @@ where
         // write to logger
         write_buf.extend(&buf[..numb]);
         loop {
-            let result = Pin::new(&mut *logger).poll_write(cx, write_buf.as_slices().0);
-            if let Poll::Ready(result) = result {
-                match result {
-                    Err(e) => return Poll::Ready(Err(e)),
-                    Ok(numb) => {
-                        if numb == 0 {
-                            break;
-                        }
-                        write_buf.drain(..numb);
-                        if write_buf.is_empty() {
-                            break;
-                        }
-                    }
+            let result = Pin::new(&mut *logger).poll_write_vectored(
+                cx,
+                &[
+                    IoSlice::new(write_buf.as_slices().0),
+                    IoSlice::new(write_buf.as_slices().1),
+                ],
+            )?;
+            if let Poll::Ready(numb) = result {
+                if numb == 0 {
+                    break;
+                }
+                write_buf.drain(..numb);
+                if write_buf.is_empty() {
+                    break;
                 }
             } else {
                 break;
@@ -173,20 +167,21 @@ where
 
         if !write_buf.is_empty() {
             loop {
-                let result = Pin::new(&mut *logger).poll_write(cx, write_buf.as_slices().0);
-                if let Poll::Ready(result) = result {
+                let result = Pin::new(&mut *logger).poll_write_vectored(
+                    cx,
+                    &[
+                        IoSlice::new(write_buf.as_slices().0),
+                        IoSlice::new(write_buf.as_slices().1),
+                    ],
+                )?;
+                if let Poll::Ready(numb) = result {
                     ready = true;
-                    match result {
-                        Err(e) => return Poll::Ready(Err(e)),
-                        Ok(numb) => {
-                            if numb == 0 {
-                                break;
-                            }
-                            write_buf.drain(..numb);
-                            if write_buf.is_empty() {
-                                break;
-                            }
-                        }
+                    if numb == 0 {
+                        break;
+                    }
+                    write_buf.drain(..numb);
+                    if write_buf.is_empty() {
+                        break;
                     }
                 } else {
                     break;
@@ -195,22 +190,14 @@ where
         }
 
         if write_buf.is_empty() {
-            if let Poll::Ready(result) = Pin::new(logger).poll_flush(cx) {
-                if let Err(e) = result {
-                    return Poll::Ready(Err(e));
-                }
-            } else {
+            if Pin::new(logger).poll_flush(cx)?.is_pending() {
                 ready = false;
             }
         } else {
             ready = false;
         }
 
-        if let Poll::Ready(result) = Pin::new(inner).poll_flush(cx) {
-            if let Err(e) = result {
-                return Poll::Ready(Err(e));
-            }
-        } else {
+        if Pin::new(inner).poll_flush(cx)?.is_pending() {
             ready = false;
         }
 
@@ -225,26 +212,15 @@ where
         // Ideally, the shutdown of the logger should be a no-op
         // Since we own the logger here, we'll still propagate shutdown to it.
         let mut ready = true;
-        if let Poll::Ready(result) = self.as_mut().poll_flush(cx) {
-            if let Err(e) = result {
-                return Poll::Ready(Err(e));
-            }
-            if let Poll::Ready(result) = Pin::new(&mut self.logger).poll_shutdown(cx) {
-                if let Err(e) = result {
-                    return Poll::Ready(Err(e));
-                }
-            } else {
+        if self.as_mut().poll_flush(cx)?.is_ready() {
+            if Pin::new(&mut self.logger).poll_shutdown(cx)?.is_pending() {
                 ready = false;
             }
         } else {
             ready = false;
         }
 
-        if let Poll::Ready(result) = Pin::new(&mut self.inner).poll_shutdown(cx) {
-            if let Err(e) = result {
-                return Poll::Ready(Err(e));
-            }
-        } else {
+        if Pin::new(&mut self.inner).poll_shutdown(cx)?.is_pending() {
             ready = false;
         }
 
