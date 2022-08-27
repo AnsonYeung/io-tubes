@@ -19,8 +19,8 @@ where
     V: AsyncWrite + Unpin,
 {
     inner: T,
-    read_logger: U,
-    write_logger: V,
+    pub(super) read_logger: U,
+    pub(super) write_logger: V,
     read_buf: Vec<u8>,
     read_buf_logged: usize,
     write_buf: Vec<u8>,
