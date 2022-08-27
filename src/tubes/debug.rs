@@ -8,33 +8,37 @@ use std::{
 
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, ReadBuf};
 
-pub struct DebugTube<T, U>
+pub struct DebugTube<T, U, V>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
+    V: AsyncWrite + Unpin,
 {
     inner: T,
-    logger: U,
+    read_logger: U,
+    write_logger: V,
     read_buf: Vec<u8>,
     read_buf_logged: usize,
     write_buf: Vec<u8>,
 }
 
-impl<T, U> DebugTube<T, U>
+impl<T, U, V> DebugTube<T, U, V>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
+    V: AsyncWrite + Unpin,
 {
     /// Create a new DebugTube with the supplied logger with capacity 8KB
-    pub fn new(inner: T, logger: U) -> Self {
-        Self::with_capacity(8 * 1024, inner, logger)
+    pub fn new(inner: T, read_logger: U, write_logger: V) -> Self {
+        Self::with_capacity(8 * 1024, inner, read_logger, write_logger)
     }
 
     /// Create a new DebugTube with the specified capacity
-    pub fn with_capacity(capacity: usize, inner: T, logger: U) -> Self {
+    pub fn with_capacity(capacity: usize, inner: T, read_logger: U, write_logger: V) -> Self {
         Self {
             inner,
-            logger,
+            read_logger,
+            write_logger,
             read_buf: Vec::with_capacity(capacity),
             read_buf_logged: 0,
             write_buf: Vec::with_capacity(capacity),
@@ -42,10 +46,11 @@ where
     }
 }
 
-impl<T, U> AsyncRead for DebugTube<T, U>
+impl<T, U, V> AsyncRead for DebugTube<T, U, V>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
+    V: AsyncWrite + Unpin,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -66,15 +71,17 @@ where
 // Vectored write is not implemented even if both logger and inner is optimied for vectored write.
 // This is due to the need for buffering will cause the slices to be stored in a Vec which defies
 // the purpose of a vectored write.
-impl<T, U> AsyncWrite for DebugTube<T, U>
+impl<T, U, V> AsyncWrite for DebugTube<T, U, V>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
+    V: AsyncWrite + Unpin,
 {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
         let Self {
             inner,
-            logger,
+            read_logger: _,
+            write_logger,
             read_buf: _,
             read_buf_logged: _,
             write_buf,
@@ -99,7 +106,7 @@ where
         // write to logger
         write_buf.extend(&buf[..numb]);
         loop {
-            let result = Pin::new(&mut *logger).poll_write(cx, write_buf)?;
+            let result = Pin::new(&mut *write_logger).poll_write(cx, write_buf)?;
             if let Poll::Ready(numb) = result {
                 if numb == 0 {
                     break;
@@ -125,7 +132,8 @@ where
 
         let Self {
             inner,
-            logger,
+            read_logger: _,
+            write_logger,
             read_buf: _,
             read_buf_logged: _,
             write_buf,
@@ -133,7 +141,7 @@ where
 
         if !write_buf.is_empty() {
             loop {
-                let result = Pin::new(&mut *logger).poll_write(cx, write_buf)?;
+                let result = Pin::new(&mut *write_logger).poll_write(cx, write_buf)?;
                 if let Poll::Ready(numb) = result {
                     ready = true;
                     if numb == 0 {
@@ -150,7 +158,7 @@ where
         }
 
         if write_buf.is_empty() {
-            if Pin::new(logger).poll_flush(cx)?.is_pending() {
+            if Pin::new(write_logger).poll_flush(cx)?.is_pending() {
                 ready = false;
             }
         } else {
@@ -191,10 +199,11 @@ where
     }
 }
 
-impl<T, U> AsyncBufRead for DebugTube<T, U>
+impl<T, U, V> AsyncBufRead for DebugTube<T, U, V>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
+    V: AsyncWrite + Unpin,
 {
     fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
         // while using unsafe code can lead to better performance, it's also easlier to make bugs.
@@ -205,7 +214,8 @@ where
 
         let Self {
             inner,
-            logger,
+            read_logger,
+            write_logger: _,
             read_buf,
             read_buf_logged,
             write_buf: _,
@@ -227,7 +237,8 @@ where
             }
 
             // write to logger
-            let result = Pin::new(&mut *logger).poll_write(cx, &read_buf[*read_buf_logged..len])?;
+            let result =
+                Pin::new(&mut *read_logger).poll_write(cx, &read_buf[*read_buf_logged..len])?;
             if let Poll::Ready(numb) = result {
                 if numb == 0 {
                     read_buf.truncate(len);
@@ -256,25 +267,56 @@ where
         Poll::Pending
     }
 
-    fn consume(self: Pin<&mut Self>, amt: usize) {
+    fn consume(mut self: Pin<&mut Self>, amt: usize) {
+        self.read_buf_logged -= amt;
         self.get_mut().read_buf.drain(..amt);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use tokio::{io::AsyncWriteExt, net::TcpStream};
+
     use super::DebugTube;
-    use crate::tubes::{ProcessTube, Tube};
-    use std::io;
+    use crate::tubes::{Listener, ProcessTube, Tube};
+    use std::{
+        io,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+    };
 
     #[tokio::test]
-    async fn can_debug_tube() -> io::Result<()> {
-        let mut logger = Vec::new();
+    async fn debug_tube_ok() -> io::Result<()> {
+        let mut read_logger = Vec::new();
+        let mut write_logger = Vec::new();
         let p = ProcessTube::new("/usr/bin/cat")?;
-        let mut p = Tube::new(DebugTube::new(p, &mut logger));
+        let mut p = Tube::new(DebugTube::new(p, &mut read_logger, &mut write_logger));
         p.send_line("abc").await?;
         assert_eq!(p.recv_line().await?, b"abc\n");
-        assert_eq!(logger, b"abc\nabc\n");
+        p.send_line("def").await?;
+        assert_eq!(p.recv_line().await?, b"def\n");
+        assert_eq!(read_logger, b"abc\ndef\n");
+        assert_eq!(write_logger, b"abc\ndef\n");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn debug_tube_ok_tcp() -> io::Result<()> {
+        let mut read_logger = Vec::new();
+        let mut write_logger = Vec::new();
+        let l = Listener::listen().await?;
+        let p =
+            TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), l.port()?)).await?;
+        let mut p = Tube::new(DebugTube::new(p, &mut read_logger, &mut write_logger));
+        p.send_line("abc").await?;
+        p.send_line("def").await?;
+        p.send_line("Client Hello").await?;
+        p.flush().await?;
+        let mut s = l.accept().await?;
+        s.send_line("Server Hello").await?;
+        s.flush().await?;
+        assert_eq!(p.recv_line().await?, b"Server Hello\n");
+        assert_eq!(read_logger, b"Server Hello\n");
+        assert_eq!(write_logger, b"abc\ndef\nClient Hello\n");
         Ok(())
     }
 }
