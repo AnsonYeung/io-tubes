@@ -8,6 +8,10 @@ use std::{
 
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, ReadBuf};
 
+/// A tube-like struct which logs all data passed through it by acting like `tee`.
+/// When shutdown is called on this struct, the logger passed to it will not be shutdown.
+/// If you wish to shutdown those tubes, you can pass in a mutable reference and perform shutdown
+/// manually after the debug tube is shutdown (which ensures the data is flushed to the loggers).
 pub struct DebugTube<T, U, V>
 where
     T: AsyncRead + AsyncWrite + Unpin,
@@ -41,7 +45,8 @@ where
             write_logger,
             read_buf: Vec::with_capacity(capacity),
             read_buf_logged: 0,
-            write_buf: Vec::with_capacity(capacity),
+            write_buf: Vec::with_capacity(capacity), // this should auto grow, using capacity
+                                                     // provided as a heuristic here.
         }
     }
 }
