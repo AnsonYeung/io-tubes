@@ -88,37 +88,21 @@ where
             write_buf,
         } = self.get_mut();
         let mut ready = false;
-        let mut numb = 0;
 
         // invoke underlying write
-        loop {
-            let result = Pin::new(&mut *inner).poll_write(cx, &buf[numb..])?;
-            if let Poll::Ready(_numb) = result {
+        let numb = match Pin::new(&mut *inner).poll_write(cx, buf)? {
+            Poll::Ready(numb) => {
                 ready = true;
-                numb += _numb;
-                if numb == buf.len() || _numb == 0 {
-                    break;
-                }
-            } else {
-                break;
+                numb
             }
-        }
+            Poll::Pending => 0,
+        };
 
         // write to logger
         write_buf.extend(&buf[..numb]);
-        loop {
-            let result = Pin::new(&mut *write_logger).poll_write(cx, write_buf)?;
-            if let Poll::Ready(numb) = result {
-                if numb == 0 {
-                    break;
-                }
-                write_buf.drain(..numb);
-                if write_buf.is_empty() {
-                    break;
-                }
-            } else {
-                break;
-            }
+        let result = Pin::new(&mut *write_logger).poll_write(cx, write_buf)?;
+        if let Poll::Ready(numb) = result {
+            write_buf.drain(..numb);
         }
 
         if ready {
