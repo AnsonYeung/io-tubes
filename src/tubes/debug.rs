@@ -1,7 +1,6 @@
 use std::{
     cmp::min,
     io,
-    ops::DerefMut,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -14,36 +13,34 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, ReadBuf};
 /// manually after the debug tube is shutdown (which ensures the data is flushed to the loggers).
 pub struct DebugTube<T, U, V>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
     V: AsyncWrite + Unpin,
 {
     inner: T,
     pub(super) read_logger: U,
     pub(super) write_logger: V,
-    read_buf: Vec<u8>,
     read_buf_logged: usize,
     write_buf: Vec<u8>,
 }
 
 impl<T, U, V> DebugTube<T, U, V>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
     V: AsyncWrite + Unpin,
 {
-    /// Create a new DebugTube with the supplied logger with capacity 8KB
+    /// Create a new DebugTube with the supplied logger with initial capacity 8KB
     pub fn new(inner: T, read_logger: U, write_logger: V) -> Self {
         Self::with_capacity(8 * 1024, inner, read_logger, write_logger)
     }
 
-    /// Create a new DebugTube with the specified capacity
+    /// Create a new DebugTube with the specified initial capacity
     pub fn with_capacity(capacity: usize, inner: T, read_logger: U, write_logger: V) -> Self {
         Self {
             inner,
             read_logger,
             write_logger,
-            read_buf: Vec::with_capacity(capacity),
             read_buf_logged: 0,
             write_buf: Vec::with_capacity(capacity), // this should auto grow, using capacity
                                                      // provided as a heuristic here.
@@ -53,7 +50,7 @@ where
 
 impl<T, U, V> AsyncRead for DebugTube<T, U, V>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
     V: AsyncWrite + Unpin,
 {
@@ -78,7 +75,7 @@ where
 // the purpose of a vectored write.
 impl<T, U, V> AsyncWrite for DebugTube<T, U, V>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
     V: AsyncWrite + Unpin,
 {
@@ -87,7 +84,6 @@ where
             inner,
             read_logger: _,
             write_logger,
-            read_buf: _,
             read_buf_logged: _,
             write_buf,
         } = self.get_mut();
@@ -139,7 +135,6 @@ where
             inner,
             read_logger: _,
             write_logger,
-            read_buf: _,
             read_buf_logged: _,
             write_buf,
         } = self.get_mut();
@@ -206,81 +201,48 @@ where
 
 impl<T, U, V> AsyncBufRead for DebugTube<T, U, V>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
+    T: AsyncBufRead + AsyncWrite + Unpin,
     U: AsyncWrite + Unpin,
     V: AsyncWrite + Unpin,
 {
-    fn poll_fill_buf(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
-        // while using unsafe code can lead to better performance, it's also easlier to make bugs.
-        if self.read_buf_logged > 0 {
-            let read_buf_logged = self.read_buf_logged;
-            return Poll::Ready(Ok(&self.get_mut().read_buf[..read_buf_logged]));
-        }
-
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
         let Self {
             inner,
             read_logger,
             write_logger: _,
-            read_buf,
             read_buf_logged,
             write_buf: _,
-        } = self.deref_mut();
+        } = self.get_mut();
 
-        let mut len = read_buf.len();
-        read_buf.resize(read_buf.capacity(), 0);
-        let mut ready = true;
+        let buf = match Pin::new(inner).poll_fill_buf(cx)? {
+            Poll::Ready(buf) => buf,
+            Poll::Pending => return Poll::Pending,
+        };
 
-        while ready {
-            ready = false;
-
-            // invoke underlying read
-            let mut buf = ReadBuf::new(&mut read_buf[len..]);
-            let result = Pin::new(&mut *inner).poll_read(cx, &mut buf);
-            if result?.is_ready() {
-                ready = true;
-                len += buf.filled().len();
-            }
-
-            // write to logger
-            let result =
-                Pin::new(&mut *read_logger).poll_write(cx, &read_buf[*read_buf_logged..len])?;
-            if let Poll::Ready(numb) = result {
-                if numb == 0 {
-                    read_buf.truncate(len);
-                    if ready || *read_buf_logged > 0 {
-                        // both logger and inner are ready, and we can't move forward because we
-                        // can't write to logger.
-                        let read_buf_logged = *read_buf_logged;
-                        return Poll::Ready(Ok(&self.get_mut().read_buf[..read_buf_logged]));
-                    }
-                    // inner is pending, there can be data incoming so we'll continue after inner
-                    // is ready.
-                    return Poll::Pending;
-                }
-                *read_buf_logged += numb;
-                ready = true;
-            }
+        if let Poll::Ready(numb) = Pin::new(read_logger).poll_write(cx, &buf[*read_buf_logged..])? {
+            *read_buf_logged += numb;
+            return Poll::Ready(Ok(&buf[..*read_buf_logged]));
         }
-
-        read_buf.truncate(len);
 
         if *read_buf_logged > 0 {
-            let read_buf_logged = *read_buf_logged;
-            return Poll::Ready(Ok(&self.get_mut().read_buf[..read_buf_logged]));
+            Poll::Ready(Ok(&buf[..*read_buf_logged]))
+        } else {
+            Poll::Pending
         }
-
-        Poll::Pending
     }
 
     fn consume(mut self: Pin<&mut Self>, amt: usize) {
         self.read_buf_logged -= amt;
-        self.get_mut().read_buf.drain(..amt);
+        Pin::new(&mut self.get_mut().inner).consume(amt);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tokio::{io::AsyncWriteExt, net::TcpStream};
+    use tokio::{
+        io::{AsyncWriteExt, BufReader},
+        net::TcpStream,
+    };
 
     use super::DebugTube;
     use crate::tubes::{Listener, ProcessTube, Tube};
@@ -294,7 +256,11 @@ mod tests {
         let mut read_logger = Vec::new();
         let mut write_logger = Vec::new();
         let p = ProcessTube::new("/usr/bin/cat")?;
-        let mut p = Tube::new(DebugTube::new(p, &mut read_logger, &mut write_logger));
+        let mut p = Tube::from_buffered(DebugTube::new(
+            BufReader::new(p),
+            &mut read_logger,
+            &mut write_logger,
+        ));
         p.send_line("abc").await?;
         assert_eq!(p.recv_line().await?, b"abc\n");
         p.send_line("def").await?;
@@ -311,7 +277,11 @@ mod tests {
         let l = Listener::listen().await?;
         let p =
             TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), l.port()?)).await?;
-        let mut p = Tube::new(DebugTube::new(p, &mut read_logger, &mut write_logger));
+        let mut p = Tube::from_buffered(DebugTube::new(
+            BufReader::new(p),
+            &mut read_logger,
+            &mut write_logger,
+        ));
         p.send_line("abc").await?;
         p.send_line("def").await?;
         p.send_line("Client Hello").await?;
