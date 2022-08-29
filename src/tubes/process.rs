@@ -95,7 +95,7 @@ impl AsyncWrite for ProcessTube {
         self: Pin<&mut Self>,
         cx: &mut Context,
         bufs: &[io::IoSlice],
-    ) -> Poll<Result<usize, io::Error>> {
+    ) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().stdin).poll_write_vectored(cx, bufs)
     }
 

@@ -296,7 +296,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context,
         bufs: &[io::IoSlice],
-    ) -> Poll<Result<usize, io::Error>> {
+    ) -> Poll<io::Result<usize>> {
         let numb = match Pin::new(&mut self.get_mut().inner).poll_write_vectored(cx, bufs)? {
             Poll::Ready(numb) => numb,
             Poll::Pending => return Poll::Pending,
