@@ -23,6 +23,15 @@ async fn main() -> io::Result<()> {
     // You can use any type that implements `AsRef<[u8]>`
     let output = p.recv_until(b"World".to_vec()).await?;
     assert_eq!(output, b"Hello World");
+
+    // Interact with the tube
+    p.interactive().await?;
+
     Ok(())
 }
 ```
+
+## Logging
+This crate provides logging of sent and received bytes through the [`log`](https://docs.rs/log) crate.
+You can use [any logger implementation](https://docs.rs/log#available-logging-implementations) with the
+log level at `DEBUG` or lower to capture the output.

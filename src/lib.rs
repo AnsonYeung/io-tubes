@@ -1,10 +1,10 @@
-//! Tubes
+//! # Tubes
 //!
 //! Provides tube functionality like the python library [pwntools](https://github.com/Gallopsled/pwntools).
 //!
 //! The methods are provided in the struct [`Tube`](tubes::Tube)
 //!
-//! Example:
+//! ## Example
 //!
 //! ```rust
 //! use io_tubes::tubes::Tube;
@@ -21,6 +21,10 @@
 //!     // You can use any type that implements `AsRef<[u8]>`
 //!     let output = p.recv_until(b"World".to_vec()).await?;
 //!     assert_eq!(output, b"Hello World");
+//!
+//!     // Interact with the tube
+//!     p.interactive().await?;
+//!
 //!     Ok(())
 //! }
 //!
@@ -48,5 +52,9 @@
 //!
 //! create_remote();
 //! ```
+//! ## Logging
+//! This crate provides logging of sent and received bytes through the [`log`](https://docs.rs/log) crate.
+//! You can use [any logger implementation](https://docs.rs/log#available-logging-implementations) with the
+//! log level at `DEBUG` or lower to capture the output.
 pub mod tubes;
 mod utils;
