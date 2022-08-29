@@ -6,6 +6,8 @@ use std::{
     time::Duration,
 };
 
+use log::debug;
+use pretty_hex::PrettyHex;
 use tokio::{
     io::{
         AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
@@ -44,6 +46,8 @@ where
     /// Hence, timeout can only be reliably implemented for async fn (which returns a future under
     /// the hood) or fn that return a future.
     pub timeout: Duration,
+
+    read_buf_logged: usize,
 }
 
 const NEW_LINE: u8 = 0xA;
@@ -57,6 +61,7 @@ where
         Self {
             inner: BufReader::new(inner),
             timeout: Duration::MAX,
+            read_buf_logged: 0,
         }
     }
 
@@ -83,6 +88,7 @@ where
         Self {
             inner: BufReader::new(inner),
             timeout,
+            read_buf_logged: 0,
         }
     }
 }
@@ -147,6 +153,7 @@ where
         Self {
             inner,
             timeout: Duration::MAX,
+            read_buf_logged: 0,
         }
     }
 
@@ -247,7 +254,18 @@ where
         cx: &mut Context,
         buf: &mut ReadBuf,
     ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+        let olen = buf.filled().len();
+
+        if Pin::new(&mut self.get_mut().inner)
+            .poll_read(cx, buf)?
+            .is_pending()
+        {
+            return Poll::Pending;
+        }
+
+        debug!(target: "Tube::recv", "Received {:?}", buf.filled()[olen..].hex_dump());
+
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -256,7 +274,14 @@ where
     T: AsyncBufRead + AsyncWrite + Unpin,
 {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+        let numb = match Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)? {
+            Poll::Ready(numb) => numb,
+            Poll::Pending => return Poll::Pending,
+        };
+
+        debug!(target: "Tube::send", "Sent {:?}", buf[..numb].hex_dump());
+
+        Poll::Ready(Ok(numb))
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
@@ -272,7 +297,21 @@ where
         cx: &mut Context,
         bufs: &[io::IoSlice],
     ) -> Poll<Result<usize, io::Error>> {
-        Pin::new(&mut self.get_mut().inner).poll_write_vectored(cx, bufs)
+        let numb = match Pin::new(&mut self.get_mut().inner).poll_write_vectored(cx, bufs)? {
+            Poll::Ready(numb) => numb,
+            Poll::Pending => return Poll::Pending,
+        };
+
+        let mut to_log = numb;
+        for buf in bufs {
+            if to_log == 0 {
+                break;
+            }
+            debug!(target: "Tube::send", "Send {:?}", buf[..to_log].hex_dump());
+            to_log = to_log.saturating_sub(buf.len());
+        }
+
+        Poll::Ready(Ok(numb))
     }
 
     fn is_write_vectored(&self) -> bool {
@@ -285,11 +324,28 @@ where
     T: AsyncBufRead + AsyncWrite + Unpin,
 {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<&[u8]>> {
-        Pin::new(&mut self.get_mut().inner).poll_fill_buf(cx)
+        let Self {
+            inner,
+            timeout: _,
+            read_buf_logged,
+        } = self.get_mut();
+
+        let buf = match Pin::new(inner).poll_fill_buf(cx)? {
+            Poll::Ready(buf) => buf,
+            Poll::Pending => return Poll::Pending,
+        };
+
+        if buf.len() > *read_buf_logged {
+            debug!(target: "Tube::recv", "Recevied {:?}", buf[*read_buf_logged..].hex_dump());
+            *read_buf_logged = buf.len();
+        }
+
+        Poll::Ready(Ok(buf))
     }
 
-    fn consume(self: Pin<&mut Self>, amt: usize) {
-        Pin::new(&mut self.get_mut().inner).consume(amt)
+    fn consume(mut self: Pin<&mut Self>, amt: usize) {
+        self.read_buf_logged -= amt;
+        Pin::new(&mut self.get_mut().inner).consume(amt);
     }
 }
 
@@ -310,6 +366,7 @@ where
         Self {
             inner: tube_like,
             timeout: Duration::MAX,
+            read_buf_logged: 0,
         }
     }
 }
