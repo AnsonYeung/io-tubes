@@ -20,7 +20,7 @@ pub struct ProcessTube {
 
 impl ProcessTube {
     /// Create a new ProcessTube by launching a program
-    pub fn new<S: AsRef<OsStr>>(program: S) -> io::Result<Self> {
+    pub fn new(program: impl AsRef<OsStr>) -> io::Result<Self> {
         Command::new(program).try_into()
     }
 

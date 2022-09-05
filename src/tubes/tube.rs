@@ -139,7 +139,7 @@ impl Tube<BufReader<TcpStream>> {
     ///
     /// create_remote();
     /// ```
-    pub async fn remote<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
+    pub async fn remote(addr: impl ToSocketAddrs) -> io::Result<Self> {
         Ok(Self::new(TcpStream::connect(addr).await?))
     }
 }
@@ -179,7 +179,7 @@ where
     /// Receive until the delims are found or EOF is reached.
     ///
     /// A lookup table will be built to enable efficient matching of long patterns.
-    pub async fn recv_until<A: AsRef<[u8]>>(&mut self, delims: A) -> io::Result<Vec<u8>> {
+    pub async fn recv_until(&mut self, delims: impl AsRef<[u8]>) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
         time::timeout(
             self.timeout,
@@ -191,13 +191,13 @@ where
     }
 
     /// Send data and flush.
-    pub async fn send<A: AsRef<[u8]>>(&mut self, data: A) -> io::Result<()> {
+    pub async fn send(&mut self, data: impl AsRef<[u8]>) -> io::Result<()> {
         self.write_all(data.as_ref()).await?;
         self.flush().await
     }
 
     /// Same as send, but add new line (0xA byte).
-    pub async fn send_line<A: AsRef<[u8]>>(&mut self, data: A) -> io::Result<()> {
+    pub async fn send_line(&mut self, data: impl AsRef<[u8]>) -> io::Result<()> {
         self.write_all(data.as_ref()).await?;
         self.write_all(&[NEW_LINE]).await?;
         self.flush().await
@@ -224,10 +224,10 @@ where
     ///
     /// send_line_after();
     /// ```
-    pub async fn send_line_after<A: AsRef<[u8]>, B: AsRef<[u8]>>(
+    pub async fn send_line_after(
         &mut self,
-        pattern: A,
-        data: B,
+        pattern: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
     ) -> io::Result<Vec<u8>> {
         let result = self.recv_until(pattern).await?;
         self.send_line(data).await?;

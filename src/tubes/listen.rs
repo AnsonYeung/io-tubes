@@ -15,7 +15,7 @@ pub struct Listener {
 
 impl Listener {
     /// Create a listener by binding to the supplied address.
-    pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
+    pub async fn bind(addr: impl ToSocketAddrs) -> io::Result<Self> {
         Ok(Listener {
             inner: TcpListener::bind(addr).await?,
         })
